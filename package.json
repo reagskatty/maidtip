@@ -1,0 +1,14 @@
+{
+  "name": "maidtip",
+  "version": "1.0.0",
+  "description": "MaidTip — a mobile web app that lets hotel guests leave a digital tip for housekeeping via a QR code.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "stripe": "^16.2.0",
+    "dotenv": "^16.4.5"
+  }
+}

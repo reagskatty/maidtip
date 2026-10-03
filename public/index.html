@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MaidTip</title>
+<style>
+  :root {
+    --accent: #2f6f4f;
+    --accent-dark: #1f4d36;
+    --bg: #faf7f2;
+    --text: #2a2a2a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    padding: 24px 16px;
+    min-height: 100vh;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+  }
+  h1 {
+    font-size: 1.35rem;
+    margin: 0 0 4px;
+    color: var(--accent-dark);
+  }
+  p.sub {
+    margin: 0 0 24px;
+    color: #666;
+    font-size: 0.95rem;
+    line-height: 1.4;
+  }
+  label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #444;
+  }
+  input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 1rem;
+    border: 1.5px solid #ddd;
+    border-radius: 10px;
+    margin-bottom: 18px;
+    -webkit-appearance: none;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .quick-amounts {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .quick-amounts button {
+    flex: 1;
+    padding: 10px 0;
+    border-radius: 10px;
+    border: 1.5px solid #ddd;
+    background: #fff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--accent-dark);
+    cursor: pointer;
+  }
+  .quick-amounts button.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  button.submit {
+    width: 100%;
+    padding: 14px 0;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.submit:active { background: var(--accent-dark); }
+  button.submit:disabled { background: #aaa; cursor: not-allowed; }
+  .error {
+    color: #b23b3b;
+    font-size: 0.85rem;
+    margin: -10px 0 16px;
+    display: none;
+  }
+  .footer-note {
+    text-align: center;
+    font-size: 0.75rem;
+    color: #999;
+    margin-top: 18px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>MaidTip</h1>
+    <p class="sub">100% goes to the staff who cared for your room. Takes less than 30 seconds.</p>
+
+    <form id="tip-form">
+      <label for="room">Room Number</label>
+      <input type="text" id="room" name="room" inputmode="numeric" placeholder="e.g. 214" required />
+
+      <label>Tip Amount</label>
+      <div class="quick-amounts" id="quick-amounts">
+        <button type="button" data-amount="5">$5</button>
+        <button type="button" data-amount="10">$10</button>
+        <button type="button" data-amount="15">$15</button>
+        <button type="button" data-amount="20">$20</button>
+      </div>
+      <input type="number" id="amount" name="amount" min="1" max="500" step="1" placeholder="Or enter a custom amount" />
+
+      <div class="error" id="error-msg"></div>
+
+      <button type="submit" class="submit" id="submit-btn">Continue to Payment</button>
+    </form>
+
+    <p class="footer-note">Secure payment powered by Stripe</p>
+  </div>
+
+<script>
+  // In production, hotelId would be embedded in the QR code URL,
+  // e.g. https://yourapp.com/?hotel=demo_hotel
+  const params = new URLSearchParams(window.location.search);
+  const hotelId = params.get('hotel') || 'demo_hotel';
+
+  const quickAmounts = document.getElementById('quick-amounts');
+  const amountInput = document.getElementById('amount');
+  const form = document.getElementById('tip-form');
+  const errorMsg = document.getElementById('error-msg');
+  const submitBtn = document.getElementById('submit-btn');
+
+  quickAmounts.addEventListener('click', (e) => {
+    if (e.target.tagName !== 'BUTTON') return;
+    [...quickAmounts.children].forEach(btn => btn.classList.remove('selected'));
+    e.target.classList.add('selected');
+    amountInput.value = e.target.dataset.amount;
+  });
+
+  amountInput.addEventListener('input', () => {
+    [...quickAmounts.children].forEach(btn => btn.classList.remove('selected'));
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorMsg.style.display = 'none';
+
+    const room = document.getElementById('room').value.trim();
+    const amount = parseFloat(amountInput.value);
+
+    if (!room) {
+      showError('Please enter your room number.');
+      return;
+    }
+    if (!amount || amount < 1) {
+      showError('Please enter a tip amount of at least $1.');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Redirecting to payment...';
+
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hotelId, roomNumber: room, amountDollars: amount }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        showError(data.error || 'Something went wrong. Please try again.');
+        resetButton();
+      }
+    } catch (err) {
+      showError('Network error. Please check your connection and try again.');
+      resetButton();
+    }
+  });
+
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.style.display = 'block';
+  }
+
+  function resetButton() {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Continue to Payment';
+  }
+</script>
+</body>
+</html>
