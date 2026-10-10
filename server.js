@@ -14,8 +14,9 @@ const PORT = process.env.PORT || 3000;
 // Your Stripe secret key (test key to start — swap for live key when ready)
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Your platform's fee, taken as a percentage of each tip (e.g. 5 = 5%)
-const PLATFORM_FEE_PERCENT = parseFloat(process.env.PLATFORM_FEE_PERCENT || '5');
+// Guest convenience fee, added ON TOP of the tip (in cents). Default $0.99.
+// The housekeeper always receives 100% of the tip amount.
+const SERVICE_FEE_CENTS = parseInt(process.env.SERVICE_FEE_CENTS || '99', 10);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -31,14 +32,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // TEMP: hardcoded hotel-to-Stripe-account mapping for the MVP.
 // Replace with a real database lookup once you have more than one hotel.
 const HOTEL_ACCOUNTS = {
-  demo_hotel: process.env.DEMO_HOTEL_STRIPE_ACCOUNT_ID || 'acct_XXXXXXXXXXXX',
+  demo_hotel: process.env.DEMO_HOTEL_STRIPE_ACCOUNT_ID || 'demo',
 };
 
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     const { hotelId, roomNumber, amountDollars } = req.body;
 
-    if (!hotelId || !HOTEL_ACCOUNTS[hotelId]) {
+    if (!hotelId || !Object.prototype.hasOwnProperty.call(HOTEL_ACCOUNTS, hotelId)) {
       return res.status(400).json({ error: 'Unknown or missing hotel ID.' });
     }
     if (!roomNumber || typeof roomNumber !== 'string') {
@@ -50,7 +51,6 @@ app.post('/api/create-checkout-session', async (req, res) => {
     }
 
     const amountInCents = Math.round(amount * 100);
-    const applicationFeeInCents = Math.round(amountInCents * (PLATFORM_FEE_PERCENT / 100));
     const connectedAccountId = HOTEL_ACCOUNTS[hotelId];
 
     // DEMO MODE: only route to a connected hotel account if a real one is
@@ -79,11 +79,24 @@ app.post('/api/create-checkout-session', async (req, res) => {
           },
           quantity: 1,
         },
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: 'Convenience fee',
+              description: 'Your housekeeper receives 100% of your tip.',
+            },
+            unit_amount: SERVICE_FEE_CENTS,
+          },
+          quantity: 1,
+        },
       ],
       payment_intent_data: {
         metadata: {
           hotelId,
           roomNumber,
+          tipCents: String(amountInCents),
+          serviceFeeCents: String(SERVICE_FEE_CENTS),
         },
       },
       success_url: `${req.protocol}://${req.get('host')}/success.html?session_id={CHECKOUT_SESSION_ID}`,
@@ -91,9 +104,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
     };
 
     if (hasRealConnectedAccount) {
-      // Routes the payment to the hotel's connected Stripe account,
-      // minus your platform's small service fee.
-      sessionConfig.payment_intent_data.application_fee_amount = applicationFeeInCents;
+      // Routes the full tip to the hotel's connected Stripe account.
+      // MaidTip keeps only the convenience fee (Stripe's processing fee
+      // is paid from it).
+      sessionConfig.payment_intent_data.application_fee_amount = SERVICE_FEE_CENTS;
       sessionConfig.payment_intent_data.transfer_data = {
         destination: connectedAccountId,
       };
